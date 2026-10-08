@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paperline — Scan documents to PDF</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#1c1814;--fg:#f3ecdf;--card:#26211c;--pri:#f2a83b;--pri-fg:#2a1d08;--bd:#3a342d;--mut:#a89f92;--acc:#352d24;--red:#ef6b5a}
+  body{font-family:Manrope,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+  .font-display{font-family:Fraunces,Georgia,serif;letter-spacing:-.02em}
+  .btn-primary{display:inline-flex;align-items:center;border-radius:9999px;background:var(--pri);color:var(--pri-fg);padding:.65rem 1.25rem;font-size:.875rem;font-weight:600}
+  .btn-primary:hover{opacity:.9}.btn-primary:disabled{opacity:.5}
+  .btn-ghost{display:inline-flex;align-items:center;border-radius:9999px;border:1px solid var(--bd);padding:.65rem 1.25rem;font-size:.875rem;font-weight:500}
+  .btn-ghost:hover{background:var(--acc)}
+  .chip{flex-shrink:0;border-radius:9999px;border:1px solid var(--bd);padding:.35rem 1rem;font-size:.875rem}
+  .chip:hover{background:var(--acc)}
+  .chip.on{background:var(--pri);color:var(--pri-fg);border-color:var(--pri)}
+  .icon-btn{border-radius:.25rem;padding:.125rem .4rem}.icon-btn:hover{background:var(--acc)}
+  .field{border-radius:.5rem;border:1px solid var(--bd);background:var(--bg);padding:.5rem .75rem;color:var(--fg)}
+  .page-card{overflow:hidden;border-radius:.75rem;border:1px solid var(--bd);background:var(--card);box-shadow:0 8px 20px #0006}
+  .page-add{display:flex;aspect-ratio:3/4;align-items:center;justify-content:center;border-radius:.75rem;border:2px dashed var(--bd);color:var(--mut)}
+  .page-add:hover{border-color:var(--pri);color:var(--pri)}
+  .handle{position:absolute;width:28px;height:28px;transform:translate(-50%,-50%);border-radius:9999px;border:2px solid var(--pri);background:#1c1814b3;touch-action:none;box-shadow:0 2px 8px #0008}
+  input[type=range]{width:100%;accent-color:var(--pri)}
+</style>
+</head>
+<body class="min-h-screen">
+
+<main class="mx-auto min-h-screen max-w-5xl px-5 py-10">
+  <header class="mb-10">
+    <p class="text-xs uppercase tracking-[0.3em]" style="color:var(--pri)">Paperline</p>
+    <h1 class="font-display mt-2 text-4xl md:text-6xl">Paper in. PDF out.</h1>
+    <p class="mt-3 max-w-lg" style="color:var(--mut)">Scan, straighten and clean up documents. Nothing leaves your device.</p>
+  </header>
+
+  <div class="flex flex-wrap gap-3">
+    <button id="btnCam" class="btn-primary">Scan with camera</button>
+    <button id="btnImport" class="btn-ghost">Import images</button>
+    <input id="file" type="file" accept="image/*" multiple hidden>
+  </div>
+
+  <div id="empty" class="mt-10 flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed px-6 py-20 text-center" style="border-color:var(--bd)">
+    <p class="font-display text-2xl">No pages yet</p>
+    <p class="text-sm" style="color:var(--mut)">Scan or import to start a document.</p>
+  </div>
+
+  <div id="docArea" class="hidden">
+    <section id="grid" class="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"></section>
+    <section class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border p-5" style="background:var(--card);border-color:var(--bd)">
+      <label class="text-sm" style="color:var(--mut)">File name
+        <input id="name" value="Scan" class="field mt-1 block"></label>
+      <label class="text-sm" style="color:var(--mut)">Page size
+        <select id="size" class="field mt-1 block"><option value="a4">A4</option><option value="letter">Letter</option><option value="original">Original</option></select></label>
+      <button id="btnPdf" class="btn-primary ml-auto">Save PDF</button>
+    </section>
+  </div>
+</main>
+
+<!-- Camera overlay -->
+<div id="camBox" class="fixed inset-0 z-50 hidden flex-col" style="background:var(--bg)">
+  <div class="relative flex-1 overflow-hidden">
+    <p id="camErr" class="hidden p-8 text-center" style="color:var(--mut)"></p>
+    <video id="video" autoplay playsinline muted class="h-full w-full object-contain"></video>
+  </div>
+  <div class="flex items-center justify-between p-6">
+    <button id="camCancel" class="btn-ghost">Cancel</button>
+    <button id="snap" aria-label="Capture" class="rounded-full border-4" style="width:72px;height:72px;border-color:var(--pri);background:var(--fg)"></button>
+    <span class="w-16"></span>
+  </div>
+</div>
+
+<!-- Editor overlay -->
+<div id="edBox" class="fixed inset-0 z-50 hidden flex-col" style="background:var(--bg)">
+  <header class="flex items-center justify-between border-b px-4 py-3" style="border-color:var(--bd)">
+    <button id="edCancel" class="btn-ghost">Cancel</button>
+    <h2 class="font-display text-lg">Adjust page</h2>
+    <button id="edDone" class="btn-primary">Done</button>
+  </header>
+  <div class="flex flex-1 items-center justify-center overflow-hidden p-6">
+    <div id="box" class="relative max-h-full select-none" style="touch-action:none;height:100%;max-width:100%">
+      <img id="edImg" alt="Captured page" class="h-full w-full object-contain" draggable="false">
+      <svg id="svg" class="absolute inset-0 h-full w-full" preserveAspectRatio="none">
+        <polygon id="poly" style="fill:#f2a83b2e;stroke:#f2a83b;stroke-width:2" vector-effect="non-scaling-stroke"/>
+      </svg>
+    </div>
+  </div>
+  <div class="space-y-4 border-t p-4" style="border-color:var(--bd)">
+    <div id="chips" class="flex gap-2 overflow-x-auto">
+      <button data-f="original" class="chip">Original</button>
+      <button data-f="magic" class="chip on">Magic Color</button>
+      <button data-f="gray" class="chip">Grayscale</button>
+      <button data-f="bw" class="chip">B &amp; W</button>
+      <button id="rotL" class="chip">↺ Left</button>
+      <button id="rotR" class="chip">↻ Right</button>
+    </div>
+    <div class="grid grid-cols-2 gap-4 text-sm" style="color:var(--mut)">
+      <label>Brightness<input id="bri" type="range" min="-80" max="80" value="0"></label>
+      <label>Contrast<input id="con" type="range" min="-80" max="80" value="0"></label>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let pages = [], queue = [];
+let ed = { img: null, pts: [], filter: "magic", rot: 0, drag: null };
+
+/* ---------- image helpers ---------- */
+const loadImage = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function homography(w, h, q) {
+  const src = [[0,0],[w,0],[w,h],[0,h]], A = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], { x: u, y: v } = q[i];
+    A.push([x,y,1,0,0,0,-u*x,-u*y,u]); A.push([0,0,0,x,y,1,-v*x,-v*y,v]);
+  }
+  for (let c = 0; c < 8; c++) {
+    let p = c;
+    for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]];
+    for (let r = 0; r < 8; r++) {
+      if (r === c) continue;
+      const f = A[r][c] / A[c][c];
+      for (let k = c; k < 9; k++) A[r][k] -= f * A[c][k];
+    }
+  }
+  return [...A.map((r, i) => r[8] / r[i]), 1];
+}
+
+function warp(img, q) {
+  let w = Math.round((dist(q[0], q[1]) + dist(q[3], q[2])) / 2);
+  let h = Math.round((dist(q[0], q[3]) + dist(q[1], q[2])) / 2);
+  const s = Math.min(1, 2000 / Math.max(w, h));
+  w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
+  const sc = document.createElement("canvas"); sc.width = img.naturalWidth; sc.height = img.naturalHeight;
+  const sctx = sc.getContext("2d"); sctx.drawImage(img, 0, 0);
+  const sd = sctx.getImageData(0, 0, sc.width, sc.height).data;
+  const out = document.createElement("canvas"); out.width = w; out.height = h;
+  const octx = out.getContext("2d"), od = octx.createImageData(w, h), H = homography(w, h, q);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const d = H[6]*x + H[7]*y + H[8];
+    const u = Math.round((H[0]*x + H[1]*y + H[2]) / d), v = Math.round((H[3]*x + H[4]*y + H[5]) / d);
+    const o = (y*w + x) * 4;
+    if (u >= 0 && v >= 0 && u < sc.width && v < sc.height) {
+      const p = (v*sc.width + u) * 4;
+      od.data[o] = sd[p]; od.data[o+1] = sd[p+1]; od.data[o+2] = sd[p+2];
+    }
+    od.data[o+3] = 255;
+  }
+  octx.putImageData(od, 0, 0);
+  return out;
+}
+
+function applyFilter(c, filter, bri, con, rot) {
+  const ctx = c.getContext("2d"), img = ctx.getImageData(0, 0, c.width, c.height), d = img.data;
+  const cf = (259 * (con + 255)) / (255 * (259 - con));
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i], g = d[i+1], b = d[i+2];
+    if (filter === "magic") {
+      const a = (r + g + b) / 3;
+      r = a + (r - a) * 1.4; g = a + (g - a) * 1.4; b = a + (b - a) * 1.4;
+      r = (r - 128) * 1.35 + 150; g = (g - 128) * 1.35 + 150; b = (b - 128) * 1.35 + 150;
+    }
+    r = cf * (r + bri - 128) + 128; g = cf * (g + bri - 128) + 128; b = cf * (b + bri - 128) + 128;
+    if (filter === "gray" || filter === "bw") {
+      let l = 0.299*r + 0.587*g + 0.114*b;
+      if (filter === "bw") l = l > 140 ? 255 : 0;
+      r = g = b = l;
+    }
+    d[i] = r; d[i+1] = g; d[i+2] = b;
+  }
+  ctx.putImageData(img, 0, 0);
+  const R = ((rot % 360) + 360) % 360, o = document.createElement("canvas"), sw = R === 90 || R === 270;
+  o.width = sw ? c.height : c.width; o.height = sw ? c.width : c.height;
+  const oc = o.getContext("2d");
+  oc.translate(o.width / 2, o.height / 2); oc.rotate(R * Math.PI / 180); oc.drawImage(c, -c.width / 2, -c.height / 2);
+  return o.toDataURL("image/jpeg", 0.9);
+}
+
+async function buildPdf(list, size) {
+  const { PDFDocument } = PDFLib, pdf = await PDFDocument.create();
+  for (const p of list) {
+    const img = await pdf.embedJpg(await (await fetch(p)).arrayBuffer());
+    const [pw, ph] = size === "a4" ? [595.28, 841.89] : size === "letter" ? [612, 792] : [img.width * .75, img.height * .75];
+    const land = size !== "original" && img.width > img.height;
+    const W = land ? ph : pw, Hh = land ? pw : ph, page = pdf.addPage([W, Hh]);
+    const s = Math.min(W / img.width, Hh / img.height), dw = img.width * s, dh = img.height * s;
+    page.drawImage(img, { x: (W - dw) / 2, y: (Hh - dh) / 2, width: dw, height: dh });
+  }
+  return new Blob([await pdf.save()], { type: "application/pdf" });
+}
+
+/* ---------- pages grid ---------- */
+function renderPages() {
+  $("empty").classList.toggle("hidden", pages.length > 0);
+  $("docArea").classList.toggle("hidden", pages.length === 0);
+  $("btnPdf").textContent = `Save PDF (${pages.length})`;
+  $("grid").innerHTML = pages.map((p, i) => `
+    <figure class="page-card">
+      <img src="${p}" alt="Page ${i + 1}" class="aspect-[3/4] w-full object-contain" style="background:var(--acc)">
+      <figcaption class="flex items-center justify-between p-2 text-xs">
+        <span style="color:var(--mut)">${i + 1}</span>
+        <span class="flex gap-1">
+          <button data-a="l" data-i="${i}" aria-label="Move left" class="icon-btn">←</button>
+          <button data-a="r" data-i="${i}" aria-label="Move right" class="icon-btn">→</button>
+          <button data-a="x" data-i="${i}" aria-label="Delete" class="icon-btn" style="color:var(--red)">✕</button>
+        </span>
+      </figcaption>
+    </figure>`).join("") + `<button data-a="add" class="page-add">+ Add page</button>`;
+}
+$("grid").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const a = b.dataset.a, i = +b.dataset.i;
+  if (a === "add") return openCamera();
+  if (a === "x") pages.splice(i, 1);
+  else { const j = i + (a === "l" ? -1 : 1); if (j < 0 || j >= pages.length) return; [pages[i], pages[j]] = [pages[j], pages[i]]; }
+  renderPages();
+};
+
+/* ---------- import ---------- */
+$("btnImport").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const urls = await Promise.all([...e.target.files].map(f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); })));
+  e.target.value = ""; queue.push(...urls); nextInQueue();
+};
+
+/* ---------- camera ---------- */
+let stream = null;
+async function openCamera() {
+  $("camBox").classList.replace("hidden", "flex"); $("camErr").classList.add("hidden"); $("video").classList.remove("hidden");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } }, audio: false });
+    $("video").srcObject = stream;
+  } catch {
+    $("video").classList.add("hidden"); $("camErr").classList.remove("hidden");
+    $("camErr").textContent = "Camera not available. Allow camera access (HTTPS needed) or import images instead.";
+  }
+}
+function closeCamera() { stream?.getTracks().forEach(t => t.stop()); stream = null; $("camBox").classList.replace("flex", "hidden"); }
+$("btnCam").onclick = openCamera;
+$("camCancel").onclick = closeCamera;
+$("snap").onclick = () => {
+  const v = $("video"); if (!v.videoWidth) return;
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext("2d").drawImage(v, 0, 0);
+  closeCamera(); queue.push(c.toDataURL("image/jpeg", 0.92)); nextInQueue();
+};
+
+/* ---------- editor ---------- */
+function previewCss() {
+  const f = ed.filter, b = +$("bri").value, c = +$("con").value;
+  const base = f === "gray" ? "grayscale(1)" : f === "bw" ? "grayscale(1) contrast(3)" : f === "magic" ? "saturate(1.4) contrast(1.3) brightness(1.1)" : "";
+  return `${base} brightness(${1 + b / 200}) contrast(${1 + c / 150})`;
+}
+function drawOverlay() {
+  const W = ed.img.naturalWidth, H = ed.img.naturalHeight;
+  $("poly").setAttribute("points", ed.pts.map(p => `${p.x},${p.y}`).join(" "));
+  document.querySelectorAll(".handle").forEach((h, i) => { h.style.left = ed.pts[i].x / W * 100 + "%"; h.style.top = ed.pts[i].y / H * 100 + "%"; });
+  $("edImg").style.filter = previewCss();
+  $("box").style.transform = `rotate(${ed.rot}deg)`;
+}
+async function nextInQueue() {
+  if (!queue.length || !$("edBox").classList.contains("hidden")) return;
+  const src = queue[0], img = await loadImage(src), w = img.naturalWidth, h = img.naturalHeight, m = 0.06;
+  ed = { img, src, filter: "magic", rot: 0, drag: null, pts: [{x:w*m,y:h*m},{x:w*(1-m),y:h*m},{x:w*(1-m),y:h*(1-m)},{x:w*m,y:h*(1-m)}] };
+  $("bri").value = 0; $("con").value = 0;
+  document.querySelectorAll("#chips [data-f]").forEach(b => b.classList.toggle("on", b.dataset.f === "magic"));
+  $("edImg").src = src; $("box").style.aspectRatio = `${w}/${h}`;
+  $("svg").setAttribute("viewBox", `0 0 ${w} ${h}`);
+  document.querySelectorAll(".handle").forEach(h => h.remove());
+  ed.pts.forEach((_, i) => {
+    const b = document.createElement("button"); b.className = "handle"; b.setAttribute("aria-label", "Corner " + (i + 1));
+    b.onpointerdown = e => { e.preventDefault(); ed.drag = i; };
+    $("box").appendChild(b);
+  });
+  $("edDone").disabled = false; $("edDone").textContent = "Done";
+  $("edBox").classList.replace("hidden", "flex"); drawOverlay();
+}
+function closeEditor() { $("edBox").classList.replace("flex", "hidden"); queue.shift(); nextInQueue(); }
+
+const box = $("box");
+box.onpointermove = e => {
+  if (ed.drag === null) return;
+  const r = box.getBoundingClientRect(), W = ed.img.naturalWidth, H = ed.img.naturalHeight;
+  const x = Math.min(Math.max(0, (e.clientX - r.left) / r.width * W), W);
+  const y = Math.min(Math.max(0, (e.clientY - r.top) / r.height * H), H);
+  ed.pts[ed.drag] = { x, y }; drawOverlay();
+};
+box.onpointerup = box.onpointerleave = () => ed.drag = null;
+
+$("chips").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.f) { ed.filter = b.dataset.f; document.querySelectorAll("#chips [data-f]").forEach(x => x.classList.toggle("on", x === b)); }
+  drawOverlay();
+};
+$("rotL").onclick = () => { ed.rot -= 90; drawOverlay(); };
+$("rotR").onclick = () => { ed.rot += 90; drawOverlay(); };
+$("bri").oninput = $("con").oninput = drawOverlay;
+$("edCancel").onclick = closeEditor;
+$("edDone").onclick = async () => {
+  $("edDone").disabled = true; $("edDone").textContent = "Processing…";
+  await new Promise(r => setTimeout(r, 20));
+  pages.push(applyFilter(warp(ed.img, ed.pts), ed.filter, +$("bri").value, +$("con").value, ed.rot));
+  renderPages(); closeEditor();
+};
+
+/* ---------- export ---------- */
+$("btnPdf").onclick = async () => {
+  const b = $("btnPdf"); b.disabled = true; b.textContent = "Creating…";
+  try {
+    const blob = await buildPdf(pages, $("size").value), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = ($("name").value || "Scan") + ".pdf"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (err) { alert("PDF could not be created: " + err.message); }
+  b.disabled = false; renderPages();
+};
+
+renderPages();
+</script>
+</body>
+</html>
